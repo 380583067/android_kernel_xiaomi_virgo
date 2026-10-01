@@ -58,6 +58,8 @@ struct rnd_state {
 #ifdef __KERNEL__
 
 extern void add_device_randomness(const void *, unsigned int);
+extern void add_hwgenerator_randomness(const char *buffer, size_t count,
+				      size_t entropy);
 extern void add_input_randomness(unsigned int type, unsigned int code,
 				 unsigned int value);
 extern void add_interrupt_randomness(int irq, int irq_flags);
@@ -120,6 +122,22 @@ static inline int arch_get_random_long(unsigned long *v)
 	return 0;
 }
 static inline int arch_get_random_int(unsigned int *v)
+{
+	return 0;
+}
+static inline int arch_has_random(void)
+{
+	return 0;
+}
+static inline int arch_get_random_seed_long(unsigned long *v)
+{
+	return 0;
+}
+static inline int arch_get_random_seed_int(unsigned int *v)
+{
+	return 0;
+}
+static inline int arch_has_random_seed(void)
 {
 	return 0;
 }
