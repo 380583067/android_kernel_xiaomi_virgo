@@ -3,6 +3,14 @@ name: Build Virgo kernel
 on:
   workflow_dispatch:
     inputs:
+      selinux_mode:
+        description: SELinux 编译模式
+        type: choice
+        required: true
+        default: 编译selinux严格内核
+        options:
+          - 编译SELinux严格内核
+          - 编译SELinux宽容内核
       extra_make_args:
         description: Extra make arguments
         required: false
@@ -110,9 +118,22 @@ jobs:
           make -j"$(nproc)" "${MAKE_ARGS[@]}" "${EXTRA_ARGS[@]}"
 
       - name: Replace zImage in boot image
+        env:
+          SELINUX_MODE: ${{ inputs.selinux_mode || '编译selinux严格内核' }}
         run: |
           IMAGE_PATH="$OUT_DIR/arch/arm/boot/zImage"
-          TEMPLATE_IMAGE=".github/boot.img"
+          case "$SELINUX_MODE" in
+            编译selinux严格内核)
+              TEMPLATE_IMAGE=".github/boot.img"
+              ;;
+            编译selinux宽容内核)
+              TEMPLATE_IMAGE=".github/boot.selinux=permissive.img"
+              ;;
+            *)
+              echo "未知的 SELinux 编译模式：$SELINUX_MODE" >&2
+              exit 1
+              ;;
+          esac
           BOOT_IMAGE="$ARTIFACT_DIR/boot-virgo-${KERNEL_RELEASE}-${GITHUB_RUN_NUMBER}.img"
           test -s "$IMAGE_PATH"
           test -s "$TEMPLATE_IMAGE"
@@ -122,72 +143,72 @@ jobs:
           from struct import pack, pack_into, unpack_from
           from sys import argv
 
-          template_path, kernel_path, output_path = map(Path, argv[1:])
-          boot_image = template_path.read_bytes()
-          kernel_image = kernel_path.read_bytes()
+          模板路径, 内核路径, 输出路径 = map(Path, argv[1:])
+          启动镜像 = 模板路径.read_bytes()
+          内核镜像 = 内核路径.read_bytes()
 
-          if len(boot_image) < 608 or boot_image[:8] != b"ANDROID!":
-              raise SystemExit(f"Invalid Android boot image: {template_path}")
-          if len(kernel_image) < 0x28 or unpack_from("<I", kernel_image, 0x24)[0] != 0x016F2818:
-              raise SystemExit(f"Invalid ARM zImage: {kernel_path}")
+          if len(启动镜像) < 608 or 启动镜像[:8] != b"ANDROID!":
+              raise SystemExit(f"Invalid Android boot image: {模板路径}")
+          if len(内核镜像) < 0x28 or unpack_from("<I", 内核镜像, 0x24)[0] != 0x016F2818:
+              raise SystemExit(f"Invalid ARM zImage: {内核路径}")
 
-          read_u32 = lambda offset: unpack_from("<I", boot_image, offset)[0]
-          sizes = {
-              "kernel": read_u32(8),
-              "ramdisk": read_u32(16),
-              "second": read_u32(24),
-              "dt": read_u32(40),
+          读取整数 = lambda 偏移量: unpack_from("<I", 启动镜像, 偏移量)[0]
+          段大小 = {
+              "kernel": 读取整数(8),
+              "ramdisk": 读取整数(16),
+              "second": 读取整数(24),
+              "dt": 读取整数(40),
           }
-          page_size = read_u32(36)
-          if page_size < 608 or page_size & (page_size - 1):
-              raise SystemExit(f"Invalid boot page size: {page_size}")
-          if len(boot_image) < page_size:
+          页大小 = 读取整数(36)
+          if 页大小 < 608 or 页大小 & (页大小 - 1):
+              raise SystemExit(f"Invalid boot page size: {页大小}")
+          if len(启动镜像) < 页大小:
               raise SystemExit("Truncated Android boot header")
 
-          align = lambda size: (size + page_size - 1) // page_size * page_size
-          segments = {}
-          offset = page_size
-          for name in ("kernel", "ramdisk", "second", "dt"):
-              size = sizes[name]
-              segments[name] = boot_image[offset:offset + size]
-              if len(segments[name]) != size:
-                  raise SystemExit(f"Truncated boot image segment: {name}")
-              offset += align(size)
-          if offset != len(boot_image):
+          对齐大小 = lambda 大小: (大小 + 页大小 - 1) // 页大小 * 页大小
+          镜像段 = {}
+          偏移量 = 页大小
+          for 段名 in ("kernel", "ramdisk", "second", "dt"):
+              大小 = 段大小[段名]
+              镜像段[段名] = 启动镜像[偏移量:偏移量 + 大小]
+              if len(镜像段[段名]) != 大小:
+                  raise SystemExit(f"Truncated boot image segment: {段名}")
+              偏移量 += 对齐大小(大小)
+          if 偏移量 != len(启动镜像):
               raise SystemExit("Unsupported legacy boot image layout")
 
-          def boot_id(parts):
-              digest = sha1()
-              for part in parts:
-                  digest.update(part)
-                  digest.update(pack("<I", len(part)))
-              return digest.digest()
+          def 计算镜像标识(各段数据):
+              摘要 = sha1()
+              for 段数据 in 各段数据:
+                  摘要.update(段数据)
+                  摘要.update(pack("<I", len(段数据)))
+              return 摘要.digest()
 
-          include_dt = None
-          for hash_dt in (True, False):
-              if sizes["dt"] and not hash_dt:
+          包含设备树 = None
+          for 校验设备树 in (True, False):
+              if 段大小["dt"] and not 校验设备树:
                   continue
-              names = ("kernel", "ramdisk", "second") + (("dt",) if hash_dt else ())
-              if boot_id(segments[name] for name in names) == boot_image[576:596]:
-                  include_dt = hash_dt
+              段名列表 = ("kernel", "ramdisk", "second") + (("dt",) if 校验设备树 else ())
+              if 计算镜像标识(镜像段[段名] for 段名 in 段名列表) == 启动镜像[576:596]:
+                  包含设备树 = 校验设备树
                   break
-          if include_dt is None:
+          if 包含设备树 is None:
               raise SystemExit("Original boot image SHA-1 does not match its segments")
 
-          header = bytearray(boot_image[:page_size])
-          pack_into("<I", header, 8, len(kernel_image))
-          segments["kernel"] = kernel_image
-          names = ("kernel", "ramdisk", "second") + (("dt",) if include_dt else ())
-          header[576:608] = boot_id(segments[name] for name in names) + bytes(12)
+          镜像头 = bytearray(启动镜像[:页大小])
+          pack_into("<I", 镜像头, 8, len(内核镜像))
+          镜像段["kernel"] = 内核镜像
+          段名列表 = ("kernel", "ramdisk", "second") + (("dt",) if 包含设备树 else ())
+          镜像头[576:608] = 计算镜像标识(镜像段[段名] for 段名 in 段名列表) + bytes(12)
 
-          def pad(segment):
-              return segment + bytes(align(len(segment)) - len(segment))
+          def 填充段(单段数据):
+              return 单段数据 + bytes(对齐大小(len(单段数据)) - len(单段数据))
 
-          new_image = bytes(header) + b"".join(pad(segments[name]) for name in ("kernel", "ramdisk", "second", "dt"))
-          output_path.parent.mkdir(parents=True, exist_ok=True)
-          output_path.write_bytes(new_image)
-          print(f"Created {output_path} ({len(new_image)} bytes)")
-          print(f"SHA-256: {sha256(new_image).hexdigest()}")
+          新镜像 = bytes(镜像头) + b"".join(填充段(镜像段[段名]) for 段名 in ("kernel", "ramdisk", "second", "dt"))
+          输出路径.parent.mkdir(parents=True, exist_ok=True)
+          输出路径.write_bytes(新镜像)
+          print(f"Created {输出路径} ({len(新镜像)} bytes)")
+          print(f"SHA-256: {sha256(新镜像).hexdigest()}")
           PY
           test -s "$BOOT_IMAGE"
           echo "BOOT_IMAGE=$BOOT_IMAGE" >> "$GITHUB_ENV"
