@@ -1,4 +1,4 @@
-name: Build Virgo kernel
+name: 编译KernelSU内核
 
 on:
   workflow_dispatch:
