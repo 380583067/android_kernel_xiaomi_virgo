@@ -1,4 +1,4 @@
-name: Build cancro kernel
+name: Build Virgo kernel
 
 on:
   workflow_dispatch:
@@ -14,16 +14,11 @@ permissions:
 env:
   ARCH: arm
   SUBARCH: arm
-  MAKE_JOBS: "4"
-  TOOLCHAIN_REPOSITORY: https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9
-  TOOLCHAIN_REF: android-10.0.0_r47
-  TOOLCHAIN_DIR: /opt/toolchain/arm-linux-androideabi-4.9
-  TOOLCHAIN_PREFIX: /opt/toolchain/arm-linux-androideabi-4.9/bin/arm-linux-androideabi-
-  KERNEL_RELEASE: 3.4.113-perf
-  KERNEL_LOCALVERSION: -perf
+  TOOLCHAIN_URL: https://developer.arm.com/-/cdn-downloads/permalink/legacy-linaro-gnu-toolchains/5.1-2015.08/gcc-linaro-5.1-2015.08-x86_64_arm-linux-gnueabi.tar.xz
+  TOOLCHAIN_DIR: /opt/toolchain/gcc-linaro-5.1-2015.08-x86_64_arm-linux-gnueabi
+  TOOLCHAIN_PREFIX: /opt/toolchain/gcc-linaro-5.1-2015.08-x86_64_arm-linux-gnueabi/bin/arm-linux-gnueabi-
+  KERNEL_LOCALVERSION: -PowerBy_Cancro-SU-Lab_${{ github.run_number }}
   TZ: Asia/Shanghai
-  KBUILD_BUILD_TIMESTAMP: "Wed Sep 23 00:00:00 CST 2026"
-  KBUILD_BUILD_VERSION: "1"
   EXTRA_MAKE_ARGS: ${{ inputs.extra_make_args }}
 
 jobs:
@@ -40,9 +35,9 @@ jobs:
 
       - name: Set build directories
         run: |
-          echo "OUT_DIR=$RUNNER_TEMP/cancro-out" >> "$GITHUB_ENV"
-          echo "ARTIFACT_DIR=$RUNNER_TEMP/cancro-artifacts" >> "$GITHUB_ENV"
-          echo "CCACHE_DIR=$RUNNER_TEMP/cancro-ccache" >> "$GITHUB_ENV"
+          echo "OUT_DIR=$RUNNER_TEMP/virgo-out" >> "$GITHUB_ENV"
+          echo "ARTIFACT_DIR=$RUNNER_TEMP/virgo-artifacts" >> "$GITHUB_ENV"
+          echo "CCACHE_DIR=$RUNNER_TEMP/virgo-ccache" >> "$GITHUB_ENV"
 
       - name: Install build dependencies
         run: |
@@ -53,10 +48,10 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ${{ env.CCACHE_DIR }}
-          key: ccache-${{ runner.os }}-${{ github.ref_name }}-cancro-aosp-gcc-4.9-${{ hashFiles('arch/arm/configs/virgo_defconfig', '.github/boot.img', '.github/workflows/build.yml') }}
+          key: ccache-${{ runner.os }}-${{ github.ref_name }}-virgo-linaro-gcc-5.1-2015.08-${{ hashFiles('arch/arm/configs/virgo_defconfig', '.github/boot.img', '.github/workflows/build.yml') }}
           restore-keys: |
-            ccache-${{ runner.os }}-${{ github.ref_name }}-cancro-aosp-gcc-4.9-
-            ccache-${{ runner.os }}-cancro-aosp-gcc-4.9-
+            ccache-${{ runner.os }}-${{ github.ref_name }}-virgo-linaro-gcc-5.1-2015.08-
+            ccache-${{ runner.os }}-virgo-linaro-gcc-5.1-2015.08-
 
       - name: Configure ccache
         run: |
@@ -65,15 +60,15 @@ jobs:
           ccache --set-config=compiler_check=content
           ccache --zero-stats
 
-      - name: Checkout prebuilt AOSP GCC 4.9
+      - name: Download and extract Linaro GCC 5.1.1
         run: |
           sudo install -d -o "$USER" -g "$(id -gn)" /opt/toolchain
-          git init "$TOOLCHAIN_DIR"
-          git -C "$TOOLCHAIN_DIR" remote add origin "$TOOLCHAIN_REPOSITORY"
-          git -C "$TOOLCHAIN_DIR" fetch --depth=1 origin "refs/tags/$TOOLCHAIN_REF"
-          git -C "$TOOLCHAIN_DIR" checkout --detach FETCH_HEAD
+          TOOLCHAIN_ARCHIVE="$RUNNER_TEMP/gcc-linaro-5.1-2015.08.tar.xz"
+          curl -L --fail --connect-timeout 30 --max-time 300 "$TOOLCHAIN_URL" -o "$TOOLCHAIN_ARCHIVE"
+          tar -xJf "$TOOLCHAIN_ARCHIVE" -C /opt/toolchain
           test -x "${TOOLCHAIN_PREFIX}gcc"
           "${TOOLCHAIN_PREFIX}gcc" --version
+          echo "$TOOLCHAIN_DIR/bin" >> "$GITHUB_PATH"
 
       - name: Configure kernel
         run: |
@@ -86,16 +81,12 @@ jobs:
             O="$OUT_DIR"
             ARCH="$ARCH"
             SUBARCH="$SUBARCH"
-            CROSS_COMPILE="$TOOLCHAIN_PREFIX"
-            CC="ccache ${TOOLCHAIN_PREFIX}gcc"
+            CROSS_COMPILE="ccache $TOOLCHAIN_PREFIX"
             HOSTCFLAGS="-fcommon"
-            KCFLAGS="-fgnu89-inline"
-            LOCALVERSION=""
+            LOCALVERSION="$KERNEL_LOCALVERSION"
           )
           make "${MAKE_ARGS[@]}" "${EXTRA_ARGS[@]}" virgo_defconfig
-          scripts/config --file "$OUT_DIR/.config" --set-str LOCALVERSION "$KERNEL_LOCALVERSION" --disable LOCALVERSION_AUTO
           make "${MAKE_ARGS[@]}" "${EXTRA_ARGS[@]}" silentoldconfig
-          test "$(make -s "${MAKE_ARGS[@]}" "${EXTRA_ARGS[@]}" kernelrelease)" = "$KERNEL_RELEASE"
 
       - name: Build kernel
         run: |
@@ -107,13 +98,13 @@ jobs:
             O="$OUT_DIR"
             ARCH="$ARCH"
             SUBARCH="$SUBARCH"
-            CROSS_COMPILE="$TOOLCHAIN_PREFIX"
-            CC="ccache ${TOOLCHAIN_PREFIX}gcc"
+            CROSS_COMPILE="ccache $TOOLCHAIN_PREFIX"
             HOSTCFLAGS="-fcommon"
-            KCFLAGS="-fgnu89-inline"
-            LOCALVERSION=""
+            LOCALVERSION="$KERNEL_LOCALVERSION"
           )
-          make -j"$MAKE_JOBS" "${MAKE_ARGS[@]}" "${EXTRA_ARGS[@]}" zImage
+          make -j"$(nproc)" "${MAKE_ARGS[@]}" "${EXTRA_ARGS[@]}"
+          KERNEL_RELEASE="$(make -s "${MAKE_ARGS[@]}" "${EXTRA_ARGS[@]}" kernelrelease)"
+          echo "KERNEL_RELEASE=$KERNEL_RELEASE" >> "$GITHUB_ENV"
 
       - name: Replace zImage in boot image
         run: |
