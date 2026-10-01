@@ -17,8 +17,11 @@ env:
   TOOLCHAIN_URL: https://developer.arm.com/-/cdn-downloads/permalink/legacy-linaro-gnu-toolchains/5.1-2015.08/gcc-linaro-5.1-2015.08-x86_64_arm-linux-gnueabi.tar.xz
   TOOLCHAIN_DIR: /opt/toolchain/gcc-linaro-5.1-2015.08-x86_64_arm-linux-gnueabi
   TOOLCHAIN_PREFIX: /opt/toolchain/gcc-linaro-5.1-2015.08-x86_64_arm-linux-gnueabi/bin/arm-linux-gnueabi-
-  KERNEL_LOCALVERSION: -PowerBy_Cancro-SU-Lab_${{ github.run_number }}
+  KERNEL_RELEASE: 3.4.113-perf-kernelsu
+  KERNEL_LOCALVERSION: -perf-kernelsu
   TZ: Asia/Shanghai
+  KBUILD_BUILD_TIMESTAMP: "Wed Sep 23 00:00:00 CST 2026"
+  KBUILD_BUILD_VERSION: "1"
   EXTRA_MAKE_ARGS: ${{ inputs.extra_make_args }}
 
 jobs:
@@ -83,10 +86,12 @@ jobs:
             SUBARCH="$SUBARCH"
             CROSS_COMPILE="ccache $TOOLCHAIN_PREFIX"
             HOSTCFLAGS="-fcommon"
-            LOCALVERSION="$KERNEL_LOCALVERSION"
+            LOCALVERSION=""
           )
           make "${MAKE_ARGS[@]}" "${EXTRA_ARGS[@]}" virgo_defconfig
+          scripts/config --file "$OUT_DIR/.config" --set-str LOCALVERSION "$KERNEL_LOCALVERSION" --disable LOCALVERSION_AUTO
           make "${MAKE_ARGS[@]}" "${EXTRA_ARGS[@]}" silentoldconfig
+          test "$(make -s "${MAKE_ARGS[@]}" "${EXTRA_ARGS[@]}" kernelrelease)" = "$KERNEL_RELEASE"
 
       - name: Build kernel
         run: |
@@ -100,11 +105,9 @@ jobs:
             SUBARCH="$SUBARCH"
             CROSS_COMPILE="ccache $TOOLCHAIN_PREFIX"
             HOSTCFLAGS="-fcommon"
-            LOCALVERSION="$KERNEL_LOCALVERSION"
+            LOCALVERSION=""
           )
           make -j"$(nproc)" "${MAKE_ARGS[@]}" "${EXTRA_ARGS[@]}"
-          KERNEL_RELEASE="$(make -s "${MAKE_ARGS[@]}" "${EXTRA_ARGS[@]}" kernelrelease)"
-          echo "KERNEL_RELEASE=$KERNEL_RELEASE" >> "$GITHUB_ENV"
 
       - name: Replace zImage in boot image
         run: |
